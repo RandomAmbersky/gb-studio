@@ -3,12 +3,15 @@ import ReactDOM from "react-dom";
 import { Provider } from "react-redux";
 import { ActionCreators } from "redux-undo";
 import { ipcRenderer } from "electron";
+import settings from "electron-settings";
+import { debounce } from "lodash";
 import * as actions from "../actions";
 import configureStore from "../store/configureStore";
 import watchProject from "../lib/project/watchProject";
 import App from "../components/app/App";
 import "../lib/electron/handleFullScreen";
 import AppContainerDnD from "../components/app/AppContainerDnD";
+import plugins from "../lib/plugins/plugins";
 import "../lib/helpers/handleTheme";
 
 const store = configureStore();
@@ -36,6 +39,16 @@ window.undo = () => {
   store.dispatch(ActionCreators.undo());
 };
 
+window.addEventListener("error", (error) => {
+  if(error.message.indexOf("dead code elimination") > -1) {
+    return true;
+  }  
+  error.stopPropagation();
+  error.preventDefault();
+  store.dispatch(actions.setGlobalError(error.message, error.filename, error.lineno, error.colno, error.error.stack));
+  return false;
+});
+
 ipcRenderer.on("save-project", () => {
   store.dispatch(actions.saveProject());
 });
@@ -43,6 +56,10 @@ ipcRenderer.on("save-project", () => {
 ipcRenderer.on("save-project-and-close", async () => {
   await store.dispatch(actions.saveProject());
   window.close();
+});
+
+ipcRenderer.on("save-as-project", (event, pathName) => {
+  store.dispatch(actions.saveAsProjectAction(pathName));
 });
 
 ipcRenderer.on("undo", () => {
@@ -55,6 +72,10 @@ ipcRenderer.on("redo", () => {
 
 ipcRenderer.on("section", (event, section) => {
   store.dispatch(actions.setSection(section));
+});
+
+ipcRenderer.on("reloadAssets", (event) => {
+  store.dispatch(actions.reloadAssets());
 });
 
 ipcRenderer.on("updateSetting", (event, setting, value) => {
@@ -87,6 +108,35 @@ ipcRenderer.on("build", async (event, buildType) => {
       exportBuild: true
     })
   );
+});
+
+ipcRenderer.on("plugin-run", (event, pluginId) => {
+  if (plugins.menu[pluginId] && plugins.menu[pluginId].run) {
+    plugins.menu[pluginId].run(store, actions);
+  }
+});
+
+const worldSidebarWidth = settings.get("worldSidebarWidth");
+const filesSidebarWidth = settings.get("filesSidebarWidth");
+
+if (worldSidebarWidth) {
+  store.dispatch(actions.resizeWorldSidebar(worldSidebarWidth));
+}
+if (filesSidebarWidth) {
+  store.dispatch(actions.resizeFilesSidebar(filesSidebarWidth));
+}
+
+window.addEventListener("resize", debounce(() => {
+  const state = store.getState();
+  store.dispatch(actions.resizeWorldSidebar(state.settings.worldSidebarWidth));
+  store.dispatch(actions.resizeFilesSidebar(state.settings.filesSidebarWidth));
+}, 500));
+
+// Prevent mousewheel from accidentally changing focused number fields 
+document.body.addEventListener("mousewheel", () => {
+  if(document.activeElement.type === "number"){
+      document.activeElement.blur();
+  }
 });
 
 let modified = true;

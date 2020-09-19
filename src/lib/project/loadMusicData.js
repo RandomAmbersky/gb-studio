@@ -1,22 +1,33 @@
 import glob from "glob";
 import { promisify } from "util";
 import uuidv4 from "uuid/v4";
+import parseAssetPath from "../helpers/path/parseAssetPath";
 
 const globAsync = promisify(glob);
 
-const loadMusicData = async filename => {
-  const relativePath = filename.replace(/.*assets\/music\//, "");
+const loadMusicData = projectRoot => async filename => {
+  const { file, plugin } = parseAssetPath(filename, projectRoot, "music");
+
   return {
     id: uuidv4(),
-    name: relativePath.replace(".mod", ""),
-    filename: relativePath,
+    plugin,
+    name: file.replace(/.mod/i, ""),
+    filename: file,
     _v: Date.now()
   };
 };
 
 const loadAllMusicData = async projectRoot => {
-  const musicPaths = await globAsync(`${projectRoot}/assets/music/**/*.mod`);
-  const musicData = await Promise.all(musicPaths.map(loadMusicData));
+  const musicPaths = await globAsync(`${projectRoot}/assets/music/**/@(*.mod|*.MOD)`);
+  const pluginPaths = await globAsync(
+    `${projectRoot}/plugins/*/music/**/@(*.mod|*.MOD)`
+  );
+  const musicData = await Promise.all(
+    [].concat(
+      musicPaths.map(loadMusicData(projectRoot)),
+      pluginPaths.map(loadMusicData(projectRoot))
+    )
+  );
   return musicData;
 };
 

@@ -1,6 +1,7 @@
 /* eslint-disable react/no-multi-comp */
 import React, { Component } from "react";
 import PropTypes from "prop-types";
+import { clipboard } from "electron";
 import { connect } from "react-redux";
 import cx from "classnames";
 import uuid from "uuid/v4";
@@ -10,19 +11,9 @@ import AddCommandButton from "./AddCommandButton";
 import { FormField } from "../library/Forms";
 import ScriptEventBlock from "./ScriptEventBlock";
 import {
-  EventFields,
-  EVENT_IF_TRUE,
-  EVENT_IF_FALSE,
-  EVENT_IF_VALUE,
-  EVENT_IF_INPUT,
-  EVENT_IF_ACTOR_AT_POSITION,
-  EVENT_IF_ACTOR_DIRECTION,
-  EVENT_IF_SAVED_DATA,
   EVENT_END,
-  EVENT_LOOP,
-  EVENT_GROUP,
-  EVENT_IF_VALUE_COMPARE,
-  EVENT_SET_INPUT_SCRIPT
+  EVENT_CALL_CUSTOM_EVENT,
+  EVENT_COMMENT
 } from "../../lib/compiler/eventTypes";
 import {
   patchEvents,
@@ -37,13 +28,8 @@ import { DropdownButton } from "../library/Button";
 import { MenuItem, MenuDivider } from "../library/Menu";
 import l10n from "../../lib/helpers/l10n";
 import { SidebarHeading } from "../editors/Sidebar";
-import {
-  EventShape,
-  VariableShape,
-  MusicShape,
-  SceneShape,
-  SpriteShape
-} from "../../reducers/stateShape";
+import { EventShape } from "../../reducers/stateShape";
+import events from "../../lib/events";
 
 const ItemTypes = {
   CARD: "card"
@@ -83,26 +69,12 @@ const cardTarget = {
   }
 };
 
-const isConditionalEvent = command => {
-  return (
-    [
-      EVENT_IF_TRUE,
-      EVENT_IF_FALSE,
-      EVENT_IF_VALUE,
-      EVENT_IF_INPUT,
-      EVENT_IF_ACTOR_AT_POSITION,
-      EVENT_IF_ACTOR_DIRECTION,
-      EVENT_IF_SAVED_DATA,
-      EVENT_IF_VALUE_COMPARE
-    ].indexOf(command) > -1
-  );
-};
-
 class ActionMini extends Component {
   constructor() {
     super();
     this.state = {
-      rename: false
+      rename: false,
+      clipboardEvent: null
     };
   }
 
@@ -113,10 +85,17 @@ class ActionMini extends Component {
     });
   };
 
-  toggleElseOpen = () => {
+  toggleComment = () => {
     const { id, action, onEdit } = this.props;
     onEdit(id, {
-      __collapseElse: !action.args.__collapseElse
+      __comment: !action.args.__comment
+    });
+  };
+
+  toggleElse = () => {
+    const { id, action, onEdit } = this.props;
+    onEdit(id, {
+      __disableElse: !action.args.__disableElse
     });
   };
 
@@ -135,7 +114,8 @@ class ActionMini extends Component {
   };
 
   onPasteValues = e => {
-    const { id, clipboardEvent, onEdit, action } = this.props;
+    const { id, onEdit, action } = this.props;
+    const { clipboardEvent } = this.state;
     if (!clipboardEvent || Array.isArray(clipboardEvent)) {
       // Can't paste values if copied entire script, or not copied anything
       return;
@@ -157,13 +137,64 @@ class ActionMini extends Component {
   };
 
   onPasteEvent = before => e => {
-    const { id, clipboardEvent, onPaste } = this.props;
-    onPaste(id, clipboardEvent, before);
+    const { id, onPaste } = this.props;
+    const clipboardEvent = this.readClipboard();
+    if (clipboardEvent) {
+      onPaste(id, clipboardEvent, before);
+    }
+  };
+
+  onEdit = (newValue, postUpdate) => {
+    const { onEdit, action, id } = this.props;
+    if (postUpdate) {
+      return onEdit(
+        id,
+        postUpdate({
+          ...action.args,
+          ...newValue
+        })
+      );
+    }
+    onEdit(id, newValue);
+  };
+
+  onEditLabel = e => {
+    const { onEdit, id } = this.props;
+    onEdit(id, {
+      __label: e.currentTarget.value
+    });
+  };
+
+  readClipboard = e => {
+    try {
+      const clipboardData = JSON.parse(clipboard.readText());
+      if (clipboardData.__type === "event") {
+        this.setState({ clipboardEvent: clipboardData });
+        return clipboardData;
+      }
+      if (clipboardData.__type === "script") {
+        this.setState({ clipboardEvent: clipboardData.script });
+        return clipboardData.script;
+      }
+      this.setState({ clipboardEvent: null });
+      return null;
+    } catch (err) {
+      this.setState({ clipboardEvent: null });
+      return null;
+    }
+  };
+
+  editCustomEvent = e => {
+    const { onSelectCustomEvent, action } = this.props;
+    if (action.args.customEventId) {
+      onSelectCustomEvent(action.args.customEventId);
+    }
   };
 
   render() {
     const {
       id,
+      entityId,
       type,
       action,
       connectDragSource,
@@ -177,11 +208,11 @@ class ActionMini extends Component {
       onRemove,
       onCopy,
       onPaste,
+      onSelectCustomEvent,
       onMouseEnter,
-      onMouseLeave,
-      clipboardEvent
+      onMouseLeave
     } = this.props;
-    const { rename } = this.state;
+    const { rename, clipboardEvent } = this.state;
     const { command } = action;
 
     if (command === EVENT_END) {
@@ -192,18 +223,33 @@ class ActionMini extends Component {
             "ActionMini--Over": isOverCurrent
           })}
         >
-          <AddCommandButton onAdd={onAdd(id)} type={type} />
+          <AddCommandButton
+            onAdd={onAdd(id)}
+            onPaste={this.onPasteEvent(true)}
+            type={type}
+          />
         </div>
       );
     }
 
     const open = action.args && !action.args.__collapse;
-    const elseOpen = action.args && !action.args.__collapseElse;
+    const childKeys = action.children ? Object.keys(action.children) : [];
+    const isComment = command === EVENT_COMMENT;
+    const commented = action.args && action.args.__comment;
+    const hasElse = action.children && action.children.false;
+    const disabledElse = action.args && action.args.__disableElse;
 
     const eventName =
-      (action.args.__label ? `${action.args.__label}: ` : "") +
-      (l10n(command) || command);
-    const elseName = `${l10n("FIELD_ELSE")} - ${eventName}`;
+      action.args.__name ||
+      l10n(command) ||
+      (events[command] && events[command].name) ||
+      command;
+
+    const labelName = action.args.__label
+      ? action.args.__label
+      : isComment && action.args.text;
+
+    const hoverName = labelName || eventName;
 
     return connectDropTarget(
       connectDragPreview(
@@ -212,10 +258,8 @@ class ActionMini extends Component {
             "ActionMini--Dragging": isDragging,
             "ActionMini--Over": isOverCurrent,
             "ActionMini--Conditional":
-              isConditionalEvent(command) ||
-              command === EVENT_LOOP ||
-              command === EVENT_GROUP ||
-              command === EVENT_SET_INPUT_SCRIPT
+              childKeys.length > 0 && command !== EVENT_CALL_CUSTOM_EVENT,
+            "ActionMini--Commented": commented
           })}
         >
           <div
@@ -226,27 +270,52 @@ class ActionMini extends Component {
             {connectDragSource(
               <div
                 className={cx("ActionMini__Command", {
-                  "ActionMini__Command--Open": open
+                  "ActionMini__Command--Open": open,
+                  EventComment: isComment || commented
                 })}
                 onClick={this.toggleOpen}
               >
                 <TriangleIcon />{" "}
-                {action.args.__label ? (
+                {commented || isComment ? <span>// </span> : ""}
+                {labelName ? (
                   <span>
-                    {action.args.__label}
-                    <small>{l10n(command) || command}</small>
+                    {labelName}
+                    <small>{eventName}</small>
                   </span>
                 ) : (
-                  l10n(command) || command
+                  <span>{eventName}</span>
                 )}
               </div>
             )}
 
             <div className="ActionMini__Dropdown">
-              <DropdownButton small transparent right>
+              <DropdownButton
+                small
+                transparent
+                right
+                onMouseDown={this.readClipboard}
+              >
+                {command === EVENT_CALL_CUSTOM_EVENT && [
+                  <MenuItem key="0" onClick={this.editCustomEvent}>
+                    {l10n("MENU_EDIT_CUSTOM_EVENT")}
+                  </MenuItem>,
+                  <MenuDivider key="1" />
+                ]}
                 <MenuItem onClick={this.toggleRename}>
                   {l10n("MENU_RENAME_EVENT")}
                 </MenuItem>
+                <MenuItem onClick={this.toggleComment}>
+                  {commented
+                    ? l10n("MENU_REENABLE_EVENT")
+                    : l10n("MENU_DISABLE_EVENT")}
+                </MenuItem>
+                {hasElse && (
+                  <MenuItem onClick={this.toggleElse}>
+                    {disabledElse
+                      ? l10n("MENU_REENABLE_ELSE")
+                      : l10n("MENU_DISABLE_ELSE")}
+                  </MenuItem>
+                )}
                 <MenuDivider />
                 <MenuItem onClick={onCopy(action)}>
                   {l10n("MENU_COPY_EVENT")}
@@ -277,43 +346,76 @@ class ActionMini extends Component {
             </div>
 
             {rename && (
-              <FormField>
-                <div style={{ display: "flex" }}>
-                  <input
-                    placeholder={l10n("FIELD_LABEL")}
-                    value={action.args.__label || ""}
-                    autoFocus
-                    onBlur={this.toggleRename}
-                    onChange={e => {
-                      onEdit(id, {
-                        __label: e.currentTarget.value
-                      });
-                    }}
-                    onKeyDown={this.submitOnEnter}
-                  />
-                  <div className="SelectRenamable__EditBtn SelectRenamable__SaveBtn">
-                    {l10n("FIELD_SAVE")}
+              <div className="ActionMini__Rename">
+                <FormField>
+                  <div style={{ display: "flex" }}>
+                    <input
+                      placeholder={l10n("FIELD_LABEL")}
+                      value={action.args.__label || ""}
+                      autoFocus
+                      onBlur={this.toggleRename}
+                      onChange={this.onEditLabel}
+                      onKeyDown={this.submitOnEnter}
+                    />
+                    <div className="SelectRenamable__EditBtn SelectRenamable__SaveBtn">
+                      {l10n("FIELD_SAVE")}
+                    </div>
                   </div>
-                </div>
-              </FormField>
+                </FormField>
+              </div>
             )}
 
-            {open && EventFields[command] && EventFields[command].length > 0 && (
+            {open && events[command] && events[command].fields && (
               <ScriptEventBlock
                 id={action.id}
+                entityId={entityId}
                 command={command}
                 value={action.args}
-                onChange={newValue => {
-                  onEdit(id, newValue);
-                }}
+                onChange={this.onEdit}
+                renderEvents={key => (
+                  <div className="ActionMini__Children" key={key}>
+                    {(
+                      action.children[key] || [
+                        {
+                          id: uuid(),
+                          command: EVENT_END
+                        }
+                      ]
+                    ).map(childAction => (
+                      <ActionMiniDnD
+                        key={childAction.id}
+                        id={childAction.id}
+                        entityId={entityId}
+                        type={type}
+                        path={`${id}_true_${childAction.id}`}
+                        action={childAction}
+                        moveActions={moveActions}
+                        onAdd={onAdd}
+                        onRemove={onRemove}
+                        onEdit={onEdit}
+                        onCopy={onCopy}
+                        onPaste={onPaste}
+                        onSelectCustomEvent={onSelectCustomEvent}
+                        onMouseEnter={onMouseEnter}
+                        onMouseLeave={onMouseLeave}
+                        clipboardEvent={clipboardEvent}
+                      />
+                    ))}
+                    <div
+                      className="ActionMini__ChildrenBorder"
+                      title={hoverName}
+                    />
+                  </div>
+                )}
               />
             )}
 
-            {open &&
-              action.true &&
+            {/* {open &&
+              childKeys.length > 0 &&
+              command !== EVENT_CALL_CUSTOM_EVENT &&
               connectDropTarget(
                 <div className="ActionMini__Children">
-                  {action.true.map(childAction => (
+                  {action.children[childKeys[0]].map(childAction => (
                     <ActionMiniDnD
                       key={childAction.id}
                       id={childAction.id}
@@ -336,40 +438,54 @@ class ActionMini extends Component {
                     title={eventName}
                   />
                 </div>
-              )}
-            {action.false && (
-              <div
-                className={cx("ActionMini__Else", {
-                  "ActionMini__Else--Open": elseOpen
-                })}
-                onClick={this.toggleElseOpen}
-              >
-                <TriangleIcon /> Else
-              </div>
-            )}
-            {action.false && elseOpen && (
-              <div className="ActionMini__Children">
-                {action.false.map(childAction => (
-                  <ActionMiniDnD
-                    key={childAction.id}
-                    id={childAction.id}
-                    type={type}
-                    path={`${id}_true_${childAction.id}`}
-                    action={childAction}
-                    moveActions={moveActions}
-                    onAdd={onAdd}
-                    onRemove={onRemove}
-                    onEdit={onEdit}
-                    onCopy={onCopy}
-                    onPaste={onPaste}
-                    onMouseEnter={onMouseEnter}
-                    onMouseLeave={onMouseLeave}
-                    clipboardEvent={clipboardEvent}
-                  />
-                ))}
-                <div className="ActionMini__ChildrenBorder" title={elseName} />
-              </div>
-            )}
+              )} */}
+
+            {/* {childKeys.length > 1 &&
+              childKeys.map((key, index) => {
+                if (index === 0) {
+                  return [];
+                }
+                return [
+                  <div
+                    key={`child_${key}_header`}
+                    className={cx("ActionMini__Else", {
+                      "ActionMini__Else--Open": elseOpen
+                    })}
+                    onClick={this.toggleElseOpen}
+                  >
+                    <TriangleIcon /> {commented ? "// " : ""} Else
+                  </div>,
+                  elseOpen && (
+                    <div
+                      key={`child_${key}_body`}
+                      className="ActionMini__Children"
+                    >
+                      {action.children[key].map(childAction => (
+                        <ActionMiniDnD
+                          key={childAction.id}
+                          id={childAction.id}
+                          type={type}
+                          path={`${id}_true_${childAction.id}`}
+                          action={childAction}
+                          moveActions={moveActions}
+                          onAdd={onAdd}
+                          onRemove={onRemove}
+                          onEdit={onEdit}
+                          onCopy={onCopy}
+                          onPaste={onPaste}
+                          onMouseEnter={onMouseEnter}
+                          onMouseLeave={onMouseLeave}
+                          clipboardEvent={clipboardEvent}
+                        />
+                      ))}
+                      <div
+                        className="ActionMini__ChildrenBorder"
+                        title={elseName}
+                      />
+                    </div>
+                  )
+                ];
+              })} */}
           </div>
         </div>
       )
@@ -388,20 +504,13 @@ ActionMini.propTypes = {
   onRemove: PropTypes.func.isRequired,
   onCopy: PropTypes.func.isRequired,
   onPaste: PropTypes.func.isRequired,
+  onSelectCustomEvent: PropTypes.func.isRequired,
   moveActions: PropTypes.func.isRequired,
   onMouseLeave: PropTypes.func.isRequired,
   onMouseEnter: PropTypes.func.isRequired,
   connectDragSource: PropTypes.func.isRequired,
   connectDragPreview: PropTypes.func.isRequired,
-  connectDropTarget: PropTypes.func.isRequired,
-  clipboardEvent: PropTypes.oneOfType([
-    EventShape,
-    PropTypes.arrayOf(EventShape)
-  ])
-};
-
-ActionMini.defaultProps = {
-  clipboardEvent: null
+  connectDropTarget: PropTypes.func.isRequired
 };
 
 const ActionMiniDnD = DropTarget(
@@ -421,45 +530,56 @@ const ActionMiniDnD = DropTarget(
 );
 
 class ScriptEditor extends Component {
+  constructor() {
+    super();
+    this.state = {
+      clipboardEvent: null
+    };
+  }
+
+  shouldComponentUpdate(nextProps, nextState) {
+    const { value } = this.props;
+    const { clipboardEvent } = this.state;
+    return (
+      nextProps.value !== value || nextState.clipboardEvent !== clipboardEvent
+    );
+  }
+
+  onChange = newValue => {
+    const { onChange } = this.props;
+    onChange(newValue);
+  };
+
   moveActions = (a, b) => {
-    const { value: root, onChange } = this.props;
+    const { value: root } = this.props;
     if (a === b) {
       return;
     }
     const input = prependEvent(filterEvents(root, a), b, findEvent(root, a));
-    onChange(input);
+    this.onChange(input);
   };
 
-  onAdd = id => (command, defaults = {}) => {
-    const {
-      value: root,
-      onChange,
-      variables,
-      music,
-      scenes,
-      scene,
-      spriteSheets
-    } = this.props;
-    const eventFields = EventFields[command];
+  onAdd = id => (command, defaults = {}, defaultChildren = {}) => {
+    const { musicIds, sceneIds, actorIds, spriteSheetIds, scope } = this.props;
+    const { value: root } = this.props;
+    const eventFields = events[command].fields;
     const defaultArgs = eventFields
       ? eventFields.reduce(
           (memo, field) => {
             let replaceValue = null;
             if (field.defaultValue === "LAST_SCENE") {
-              replaceValue = scenes[scenes.length - 1].id;
+              replaceValue = sceneIds[sceneIds.length - 1];
             } else if (field.defaultValue === "LAST_VARIABLE") {
-              replaceValue =
-                variables.length > 0 ? variables[variables.length - 1].id : "0";
+              replaceValue = scope === "customEvents" ? "0" : "L0";
             } else if (field.defaultValue === "LAST_MUSIC") {
-              replaceValue = music[0].id;
+              replaceValue = musicIds[0];
             } else if (field.defaultValue === "LAST_SPRITE") {
-              replaceValue = spriteSheets[0].id;
+              replaceValue = spriteSheetIds[0];
             } else if (field.defaultValue === "LAST_ACTOR") {
-              const actors = scene.actors;
               replaceValue =
-                actors.length > 0
-                  ? scene.actors[scene.actors.length - 1].id
-                  : "player";
+                actorIds.length > 0 ? actorIds[actorIds.length - 1] : "player";
+            } else if (field.type === "events") {
+              replaceValue = undefined;
             } else if (
               field.defaultValue !== undefined &&
               !defaults[field.key]
@@ -478,6 +598,22 @@ class ScriptEditor extends Component {
         )
       : { ...defaults };
 
+    const childFields = eventFields.filter(field => field.type === "events");
+    const children = childFields.reduce((memo, field) => {
+      const childScript = defaultChildren[field.key]
+        ? defaultChildren[field.key]
+        : [
+            {
+              id: uuid(),
+              command: EVENT_END
+            }
+          ];
+      return {
+        ...memo,
+        [field.key]: childScript
+      };
+    }, {});
+
     const input = prependEvent(
       root,
       id,
@@ -487,59 +623,24 @@ class ScriptEditor extends Component {
           command,
           args: defaultArgs
         },
-        isConditionalEvent(command) && {
-          true: [
-            {
-              id: uuid(),
-              command: EVENT_END
-            }
-          ],
-          false: [
-            {
-              id: uuid(),
-              command: EVENT_END
-            }
-          ]
-        },
-        command === EVENT_LOOP && {
-          true: [
-            {
-              id: uuid(),
-              command: EVENT_END
-            }
-          ]
-        },
-        command === EVENT_GROUP && {
-          true: [
-            {
-              id: uuid(),
-              command: EVENT_END
-            }
-          ]
-        },
-        command === EVENT_SET_INPUT_SCRIPT && {
-          true: [
-            {
-              id: uuid(),
-              command: EVENT_END
-            }
-          ]
+        childFields.length > 0 && {
+          children
         }
       )
     );
-    onChange(input);
+    this.onChange(input);
   };
 
   onRemove = id => () => {
-    const { value, onChange } = this.props;
+    const { value } = this.props;
     const input = filterEvents(value, id);
-    onChange(input);
+    this.onChange(input);
   };
 
   onEdit = (id, patch) => {
-    const { value, onChange } = this.props;
+    const { value } = this.props;
     const input = patchEvents(value, id, patch);
-    onChange(input);
+    this.onChange(input);
   };
 
   onCopy = event => () => {
@@ -548,24 +649,24 @@ class ScriptEditor extends Component {
   };
 
   onCopyScript = () => {
-    const { copyEvent, value } = this.props;
-    copyEvent(value);
+    const { copyScript } = this.props;
+    const { value } = this.props;
+    copyScript(value);
   };
 
   onPaste = (id, event, before) => {
-    const { onChange, value } = this.props;
+    const { value } = this.props;
     const newEvent = Array.isArray(event)
       ? event.slice(0, -1).map(regenerateEventIds)
       : regenerateEventIds(event);
     const input = before
       ? prependEvent(value, id, newEvent)
       : appendEvent(value, id, newEvent);
-    onChange(input);
+    this.onChange(input);
   };
 
   onRemoveScript = e => {
-    const { onChange } = this.props;
-    onChange([
+    this.onChange([
       {
         id: uuid(),
         command: EVENT_END
@@ -574,9 +675,9 @@ class ScriptEditor extends Component {
   };
 
   onReplaceScript = e => {
-    const { onChange, clipboardEvent } = this.props;
+    const { clipboardEvent } = this.state;
     if (clipboardEvent) {
-      onChange(
+      this.onChange(
         []
           .concat(
             clipboardEvent,
@@ -593,15 +694,16 @@ class ScriptEditor extends Component {
   };
 
   onPasteScript = before => () => {
-    const { clipboardEvent, onChange, value } = this.props;
+    const { clipboardEvent } = this.state;
+    const { value } = this.props;
     const newEvent = Array.isArray(clipboardEvent)
       ? clipboardEvent.slice(0, -1).map(regenerateEventIds)
       : regenerateEventIds(clipboardEvent);
     if (clipboardEvent) {
       if (before) {
-        onChange([].concat(newEvent, value));
+        this.onChange([].concat(newEvent, value));
       } else {
-        onChange([].concat(value.slice(0, -1), newEvent, value.slice(-1)));
+        this.onChange([].concat(value.slice(0, -1), newEvent, value.slice(-1)));
       }
     }
   };
@@ -616,45 +718,73 @@ class ScriptEditor extends Component {
     selectScriptEvent("");
   };
 
+  onSelectCustomEvent = id => {
+    const { selectCustomEvent } = this.props;
+    selectCustomEvent(id);
+  };
+
+  readClipboard = e => {
+    try {
+      const clipboardData = JSON.parse(clipboard.readText());
+      if (clipboardData.__type === "event") {
+        this.setState({ clipboardEvent: clipboardData });
+      } else if (clipboardData.__type === "script") {
+        this.setState({ clipboardEvent: clipboardData.script });
+      } else {
+        this.setState({ clipboardEvent: null });
+      }
+    } catch (err) {
+      this.setState({ clipboardEvent: null });
+    }
+  };
+
   render() {
-    const { value, type, title, clipboardEvent } = this.props;
+    const { type, title, value, entityId, renderHeader } = this.props;
+    const { clipboardEvent } = this.state;
+
+    const buttons = (
+      <DropdownButton small transparent right onMouseDown={this.readClipboard}>
+        <MenuItem onClick={this.onCopyScript}>
+          {l10n("MENU_COPY_SCRIPT")}
+        </MenuItem>
+        {clipboardEvent && <MenuDivider />}
+        {clipboardEvent && (
+          <MenuItem onClick={this.onReplaceScript}>
+            {l10n("MENU_REPLACE_SCRIPT")}
+          </MenuItem>
+        )}
+        {clipboardEvent && value && value.length > 1 && (
+          <MenuItem onClick={this.onPasteScript(true)}>
+            {l10n("MENU_PASTE_SCRIPT_BEFORE")}
+          </MenuItem>
+        )}
+        {clipboardEvent && value && value.length > 1 && (
+          <MenuItem onClick={this.onPasteScript(false)}>
+            {l10n("MENU_PASTE_SCRIPT_AFTER")}
+          </MenuItem>
+        )}
+        <MenuDivider />
+        <MenuItem onClick={this.onRemoveScript}>
+          {l10n("MENU_DELETE_SCRIPT")}
+        </MenuItem>
+      </DropdownButton>
+    );
+
+    const heading = renderHeader ? (
+      renderHeader({ buttons })
+    ) : (
+      <SidebarHeading title={title} buttons={buttons} />
+    );
+
     return (
       <div>
-        <SidebarHeading
-          title={title}
-          buttons={
-            <DropdownButton small transparent right>
-              <MenuItem onClick={this.onCopyScript}>
-                {l10n("MENU_COPY_SCRIPT")}
-              </MenuItem>
-              {clipboardEvent && <MenuDivider />}
-              {clipboardEvent && (
-                <MenuItem onClick={this.onReplaceScript}>
-                  {l10n("MENU_REPLACE_SCRIPT")}
-                </MenuItem>
-              )}
-              {clipboardEvent && value && value.length > 1 && (
-                <MenuItem onClick={this.onPasteScript(true)}>
-                  {l10n("MENU_PASTE_SCRIPT_BEFORE")}
-                </MenuItem>
-              )}
-              {clipboardEvent && value && value.length > 1 && (
-                <MenuItem onClick={this.onPasteScript(false)}>
-                  {l10n("MENU_PASTE_SCRIPT_AFTER")}
-                </MenuItem>
-              )}
-              <MenuDivider />
-              <MenuItem onClick={this.onRemoveScript}>
-                {l10n("MENU_DELETE_SCRIPT")}
-              </MenuItem>
-            </DropdownButton>
-          }
-        />{" "}
+        {heading}
         <div className="ScriptEditor">
           {value.map(action => (
             <ActionMiniDnD
               key={action.id}
               id={action.id}
+              entityId={entityId}
               type={type}
               action={action}
               moveActions={this.moveActions}
@@ -663,6 +793,7 @@ class ScriptEditor extends Component {
               onEdit={this.onEdit}
               onCopy={this.onCopy}
               onPaste={this.onPaste}
+              onSelectCustomEvent={this.onSelectCustomEvent}
               onMouseEnter={this.onEnter}
               onMouseLeave={this.onLeave}
               clipboardEvent={clipboardEvent}
@@ -675,54 +806,58 @@ class ScriptEditor extends Component {
 }
 
 ScriptEditor.propTypes = {
-  title: PropTypes.string.isRequired,
+  title: PropTypes.string,
   type: PropTypes.string.isRequired,
   value: PropTypes.arrayOf(PropTypes.shape({})),
   onChange: PropTypes.func.isRequired,
-  variables: PropTypes.arrayOf(VariableShape).isRequired,
-  music: PropTypes.arrayOf(MusicShape).isRequired,
-  scenes: PropTypes.arrayOf(SceneShape).isRequired,
-  scene: SceneShape.isRequired,
-  spriteSheets: PropTypes.arrayOf(SpriteShape).isRequired,
-  clipboardEvent: PropTypes.oneOfType([
-    EventShape,
-    PropTypes.arrayOf(EventShape)
-  ]),
+  musicIds: PropTypes.arrayOf(PropTypes.string).isRequired,
+  sceneIds: PropTypes.arrayOf(PropTypes.string).isRequired,
+  actorIds: PropTypes.arrayOf(PropTypes.string).isRequired,
+  spriteSheetIds: PropTypes.arrayOf(PropTypes.string).isRequired,
   selectScriptEvent: PropTypes.func.isRequired,
-  copyEvent: PropTypes.func.isRequired
+  copyEvent: PropTypes.func.isRequired,
+  copyScript: PropTypes.func.isRequired,
+  selectCustomEvent: PropTypes.func.isRequired,
+  entityId: PropTypes.string.isRequired,
+  scope: PropTypes.string.isRequired,
+  renderHeader: PropTypes.func
 };
 
-ScriptEditor.defaultProps = {
-  value: [
-    {
-      id: uuid(),
-      command: EVENT_END
+ScriptEditor.defaultProps = Object.create(
+  {
+    title: ""
+  },
+  {
+    value: {
+      enumerable: true,
+      get: () => [
+        {
+          id: uuid(),
+          command: EVENT_END
+        }
+      ]
     }
-  ],
-  clipboardEvent: null
-};
+  }
+);
 
-function mapStateToProps(state) {
+function mapStateToProps(state, props) {
+  const { result, entities } = state.entities.present;
+  const { type: scope } = state.editor;
   return {
-    variables: state.project.present && state.project.present.variables,
-    scenes: state.project.present && state.project.present.scenes,
-    scene:
-      state.project.present &&
-      state.project.present.scenes.find(scene => {
-        return scene.id === state.editor.scene;
-      }),
-    music: state.project.present && state.project.present.music,
-    spriteSheets: state.project.present && state.project.present.spriteSheets,
-    clipboardEvent: state.clipboard.event
+    sceneIds: result.scenes,
+    actorIds: props.actors || entities.scenes[state.editor.scene].actors,
+    musicIds: result.music,
+    spriteSheetIds: result.spriteSheets,
+    value: props.value && props.value.length > 0 ? props.value : undefined,
+    scope
   };
 }
 
 const mapDispatchToProps = {
   selectScriptEvent: actions.selectScriptEvent,
-  copyEvent: actions.copyEvent
+  copyEvent: actions.copyEvent,
+  copyScript: actions.copyScript,
+  selectCustomEvent: actions.selectCustomEvent
 };
 
-export default connect(
-  mapStateToProps,
-  mapDispatchToProps
-)(ScriptEditor);
+export default connect(mapStateToProps, mapDispatchToProps)(ScriptEditor);

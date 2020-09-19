@@ -1,55 +1,26 @@
 import React, { Component } from "react";
 import PropTypes from "prop-types";
 import { connect } from "react-redux";
-import { SelectRenamable } from "../library/Forms";
-import * as actions from "../../actions";
-import l10n from "../../lib/helpers/l10n";
-
-const variables = Array.from(Array(512).keys()).map(n =>
-  String(n).padStart(3, "0")
-);
+import CustomEventVariableSelect from "./CustomEventVariableSelect";
+import GlobalVariableSelect from "./GlobalVariableSelect";
 
 class VariableSelect extends Component {
-  onRename = name => {
-    const { renameVariable, value } = this.props;
-    renameVariable(value || "0", name);
-  };
-
-  variableName = index => {
-    const { variableNames } = this.props;
-    return variableNames[index]
-      ? variableNames[index]
-      : `Variable ${String(index).padStart(3, "0")}`;
-  };
-
   render() {
-    const { id, value, onChange } = this.props;
-    return (
-      <SelectRenamable
-        editPlaceholder={l10n("FIELD_VARIABLE_NAME")}
-        editDefaultValue={this.variableName(value || "0")}
-        onRename={this.onRename}
-        id={id}
-        value={value}
-        onChange={onChange}
-      >
-        {variables.map((variable, index) => (
-          <option key={variable} value={index}>
-            {index < 100 && `$${String(index).padStart(2, "0")}$ : `}
-            {this.variableName(index)}
-          </option>
-        ))}
-      </SelectRenamable>
-    );
+    const { scope } = this.props;
+
+    if (scope === "customEvent") {
+      return <CustomEventVariableSelect {...this.props} />;
+    }
+    return <GlobalVariableSelect {...this.props} />;
   }
 }
 
 VariableSelect.propTypes = {
   id: PropTypes.string,
+  entityId: PropTypes.string.isRequired,
   value: PropTypes.string,
   onChange: PropTypes.func.isRequired,
-  variableNames: PropTypes.shape({}).isRequired,
-  renameVariable: PropTypes.func.isRequired
+  scope: PropTypes.string.isRequired
 };
 
 VariableSelect.defaultProps = {
@@ -58,23 +29,14 @@ VariableSelect.defaultProps = {
 };
 
 function mapStateToProps(state) {
+  if (state.editor.type === "customEvents") {
+    return {
+      scope: "customEvent"
+    };
+  }
   return {
-    variableNames: state.project.present.variables
-      ? state.project.present.variables.reduce((memo, variable) => {
-          return {
-            ...memo,
-            [variable.id]: variable.name
-          };
-        }, {})
-      : {}
+    scope: "global"
   };
 }
 
-const mapDispatchToProps = {
-  renameVariable: actions.renameVariable
-};
-
-export default connect(
-  mapStateToProps,
-  mapDispatchToProps
-)(VariableSelect);
+export default connect(mapStateToProps)(VariableSelect);

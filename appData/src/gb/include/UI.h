@@ -9,6 +9,10 @@
 #define MENU_OPEN_Y 112
 #define MENU_CLOSED_Y (MAXWNDPOSY + 1)
 #define TEXT_BUFFER_START 0xCC
+#define MENU_LAYOUT_INITIAL_X 88
+
+#define MENU_CANCEL_ON_LAST_OPTION  0x01U
+#define MENU_CANCEL_ON_B_PRESSED    0x02U
 
 extern UINT8 ui_bank;
 extern unsigned char text_lines[80];
@@ -31,8 +35,8 @@ void UIDrawFrame(UBYTE x, UBYTE y, UBYTE width, UBYTE height);
 void UIDrawDialogueFrame(UBYTE h);
 void UIDrawText(char *str, UBYTE x, UBYTE y);
 void UIDrawTextBkg(char *str, UBYTE x, UBYTE y);
-void UIShowText(UWORD line);
-void UIShowChoice(UWORD flag_index, UWORD line);
+void UIShowText(UBYTE bank, UWORD bank_offset);
+void UIShowChoice(UWORD flag_index, UBYTE bank, UWORD bank_offset);
 void UISetTextBuffer(unsigned char *text);
 void UIDrawTextBuffer();
 void UISetPos(UBYTE x, UBYTE y);
@@ -42,5 +46,8 @@ void UIOnInteract();
 UBYTE UIAtDest();
 void UISetColor(UBYTE color);
 void UISetTextSpeed(UBYTE in, UBYTE out);
+void UIShowAvatar(UBYTE avatar_index);
+void UIShowMenu(UWORD flag_index, UBYTE bank, UWORD bank_offset, UBYTE layout, UBYTE cancel_config);
+void UIDrawMenuCursor();
 
 #endif

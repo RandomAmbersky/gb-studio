@@ -5,7 +5,6 @@
   bottom: 0px;
   display: flex;
   flex-direction: row;
-  background: red;
 }
 
 .Sidebar__DragHandle {
@@ -51,16 +50,16 @@
   width: 50%;
 }
 
-.Sidebar__Content input[type="checkbox"] {
+/* .Sidebar__Content input[type="checkbox"] {
   height: auto;
-}
+} */
 
-.Sidebar__Content input:focus,
+/* .Sidebar__Content input:focus,
 .Sidebar__Content textarea:focus,
 .Sidebar__Content select:focus {
   outline: none;
   box-shadow: 0px 0px 0px 1px #03a9f4;
-}
+} */
 
 .Sidebar__Content__Save {
   position: absolute;
@@ -136,6 +135,10 @@
   border-left: 0;
 }
 
+.Sidebar--TwoColumn .Sidebar__Content .SidebarColumn:last-child {
+  margin-top: -1px;
+}
+
 .SidebarHeading {
   height: 36px;
   line-height: 36px;
@@ -156,4 +159,61 @@
 
 .SidebarHeading__FluidSpacer {
   flex: 1;
+}
+
+.SidebarTabs {
+  height: 36px;
+  line-height: 36px;
+  margin: 0px;
+  font-size: 14px;
+  font-weight: bold;
+  border-bottom: 1px solid var(--sidebar-border-color);
+  border-top: 1px solid var(--sidebar-border-color);
+  text-align: left;
+  padding: 0;
+  padding-right: 10px;
+  display: flex;
+  align-items: center;
+  padding-top: 10px;
+}
+
+.SidebarTabs__FluidSpacer {
+  flex: 1;
+}
+
+.SidebarTabs__Container {
+  display: flex;
+  overflow: hidden;
+  height: 36px;
+  padding-top: 1px;
+  padding-right: 10px;
+  box-sizing: border-box;
+}
+
+.SidebarTabs__Tab {
+  padding: 0 10px;
+  opacity: 0.5;
+  border-top: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.SidebarTabs__Tab--Active {
+  background: var(--input-bg-color);
+  opacity: 1;
+  outline: 1px solid var(--input-border-color);
+}
+
+.Sidebar--TwoColumn
+  .SidebarColumn
+  > div:first-child
+  > .SidebarTabs:first-child {
+  padding-top: 0px;
+}
+
+.Sidebar--TwoColumn
+  .SidebarColumn
+  > div:first-child
+  > .SidebarTabs:first-child
+  .SidebarTabs__Container {
+  padding-top: 0;
 }

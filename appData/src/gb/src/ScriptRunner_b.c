@@ -7,13 +7,17 @@
 #include "MusicManager.h"
 #include "FadeManager.h"
 #include "BankData.h"
+#include "BankManager.h"
 #include "UI.h"
 #include "Macros.h"
 #include "game.h"
 #include "Math.h"
+#include "gbt_player.h"
 
 #define RAM_START_PTR 0xA000
 #define RAM_START_VARS_PTR 0xA0FF
+
+extern UINT8 music_mute_frames;
 
 UINT8 scriptrunner_bank = 4;
 
@@ -52,7 +56,7 @@ void Script_End_b()
 void Script_Text_b()
 {
   script_ptr += 1 + script_cmd_args_len;
-  UIShowText((script_cmd_args[0] * 256) + script_cmd_args[1]);
+  UIShowText(script_cmd_args[0], (script_cmd_args[1] * 256) + script_cmd_args[2]);
   script_action_complete = FALSE;
 }
 
@@ -187,9 +191,11 @@ void Script_ClearFlag_b()
  */
 void Script_ActorSetDir_b()
 {
-  actors[script_actor].dir.x = script_cmd_args[0] == 2 ? -1 : script_cmd_args[0] == 4 ? 1 : 0;
-  actors[script_actor].dir.y = script_cmd_args[0] == 8 ? -1 : script_cmd_args[0] == 1 ? 1 : 0;
-  SceneRenderActor(script_actor);
+  if (ACTOR_ON_TILE(script_actor)) {
+    actors[script_actor].dir.x = script_cmd_args[0] == 2 ? -1 : script_cmd_args[0] == 4 ? 1 : 0;
+    actors[script_actor].dir.y = script_cmd_args[0] == 8 ? -1 : script_cmd_args[0] == 1 ? 1 : 0;
+    SceneRenderActor(script_actor);
+  }
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
 }
@@ -240,7 +246,7 @@ void Script_CameraLock_b()
   UBYTE cam_x, cam_y;
 
   camera_settings = script_cmd_args[0] & ~CAMERA_LOCK_FLAG;
-
+  camera_speed = (UBYTE)script_cmd_args[0] & CAMERA_SPEED_MASK;
   cam_x = ClampUBYTE(actors[0].pos.x, SCREEN_WIDTH_HALF, MUL_8(scene_width) - SCREEN_WIDTH_HALF);
   camera_dest.x = cam_x - SCREEN_WIDTH_HALF;
   cam_y = ClampUBYTE(actors[0].pos.y, SCREEN_HEIGHT_HALF, MUL_8(scene_height) - SCREEN_HEIGHT_HALF);
@@ -319,6 +325,7 @@ void Script_LoadScene_b()
   map_next_dir.y = script_cmd_args[4] == 8 ? -1 : script_cmd_args[4] == 1 ? 1 : 0;
 
   stage_next_type = SCENE;
+  scene_loaded = FALSE;
   script_action_complete = FALSE;
 
   FadeSetSpeed(script_cmd_args[5]);
@@ -341,6 +348,10 @@ void Script_ActorSetPos_b()
   actors[script_actor].pos.x = (script_cmd_args[0] << 3) + 8;
   actors[script_actor].pos.y = 0; // @wtf-but-needed
   actors[script_actor].pos.y = (script_cmd_args[1] << 3) + 8;
+  if (script_cmd_args[1] == 31)
+  {
+    actors[script_actor].pos.y = ACTOR_MAX_Y;
+  }
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
 }
@@ -361,6 +372,10 @@ void Script_ActorMoveTo_b()
   actor_move_dest.x = (script_cmd_args[0] << 3) + 8;
   actor_move_dest.y = 0; // @wtf-but-needed
   actor_move_dest.y = (script_cmd_args[1] << 3) + 8;
+  if (script_cmd_args[1] == 31)
+  {
+    actor_move_dest.y = ACTOR_MAX_Y;
+  }
   script_ptr += 1 + script_cmd_args_len;
   script_action_complete = FALSE;
 }
@@ -396,7 +411,7 @@ void Script_HideSprites_b()
  */
 void Script_ActorShow_b()
 {
-  actors[script_cmd_args[0]].enabled = TRUE;
+  actors[script_actor].enabled = TRUE;
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
 }
@@ -408,9 +423,23 @@ void Script_ActorShow_b()
  */
 void Script_ActorHide_b()
 {
-  actors[script_cmd_args[0]].enabled = FALSE;
+  actors[script_actor].enabled = FALSE;
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
+}
+
+/*
+ * Command: ActorSetCollisions
+ * ----------------------------
+ * Set collisions enabled flag for actor.
+ *
+ *   arg0: Enabled
+ */
+void Script_ActorSetCollisions_b()
+{
+  actors[script_actor].collisionsEnabled = script_cmd_args[0];
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;  
 }
 
 /*
@@ -423,7 +452,7 @@ void Script_ActorHide_b()
 void Script_ActorSetEmote_b()
 {
   script_ptr += 1 + script_cmd_args_len;
-  SceneSetEmote(script_cmd_args[0], script_cmd_args[1]);
+  SceneSetEmote(script_actor, script_cmd_args[0]);
   script_action_complete = FALSE;
 }
 
@@ -533,7 +562,7 @@ void Script_MusicStop_b()
  */
 void Script_ResetVariables_b()
 {
-  UBYTE i;
+  UWORD i;
   for (i = 0; i != NUM_VARIABLES; ++i)
   {
     script_variables[i] = FALSE;
@@ -631,7 +660,19 @@ void Script_IfInput_b()
 void Script_Choice_b()
 {
   script_ptr += 1 + script_cmd_args_len;
-  UIShowChoice((script_cmd_args[0] * 256) + script_cmd_args[1], (script_cmd_args[2] * 256) + script_cmd_args[3]);
+  UIShowChoice((script_cmd_args[0] * 256) + script_cmd_args[1], script_cmd_args[2], (script_cmd_args[3] * 256) + script_cmd_args[4]);
+  script_action_complete = FALSE;
+}
+
+/*
+ * Command: Menu
+ * ----------------------------
+ * Display multiple choice menu
+ */
+void Script_TextMenu_b()
+{
+  script_ptr += 1 + script_cmd_args_len;
+  UIShowMenu((script_cmd_args[0] * 256) + script_cmd_args[1], script_cmd_args[2], (script_cmd_args[3] * 256) + script_cmd_args[4], script_cmd_args[5], script_cmd_args[6]);
   script_action_complete = FALSE;
 }
 
@@ -644,19 +685,48 @@ void Script_PlayerSetSprite_b()
 {
   BANK_PTR sprite_bank_ptr;
   UWORD sprite_ptr;
-  UBYTE sprite_index, sprite_frames, sprite_len;
+  UWORD sprite_index;
+  UBYTE sprite_frames, sprite_len, load_size;
 
   // Load Player Sprite
-  sprite_index = script_cmd_args[0];
+  sprite_index = (script_cmd_args[0] * 256) + script_cmd_args[1];
   ReadBankedBankPtr(DATA_PTRS_BANK, &sprite_bank_ptr, &sprite_bank_ptrs[sprite_index]);
   sprite_ptr = ((UWORD)bank_data_ptrs[sprite_bank_ptr.bank]) + sprite_bank_ptr.offset;
   sprite_frames = ReadBankedUBYTE(sprite_bank_ptr.bank, sprite_ptr);
   sprite_len = MUL_4(sprite_frames);
-  SetBankedSpriteData(sprite_bank_ptr.bank, 0, sprite_len, sprite_ptr + 1);
+
+  if (sprite_frames > 6) {
+    load_size = 24;
+  } else {
+    load_size = sprite_len;
+  }
+
+  SetBankedSpriteData(sprite_bank_ptr.bank, 0, load_size, sprite_ptr + 1);
   actors[0].sprite = 0;
   actors[0].frame = 0;
-  actors[0].sprite_type = sprite_frames == 6 ? SPRITE_ACTOR_ANIMATED : sprite_frames == 3 ? SPRITE_ACTOR : SPRITE_STATIC;
-  actors[0].frames_len = sprite_frames == 6 ? 2 : sprite_frames == 3 ? 1 : sprite_frames;
+
+  if (sprite_frames > 6)
+  {
+    // Limit player to 6 frames to prevent overflow into scene actor vram
+    actors[0].sprite_type = SPRITE_STATIC;
+    actors[0].frames_len = 6;
+  }
+  else if (sprite_frames == 6)
+  {
+    actors[0].sprite_type = SPRITE_ACTOR_ANIMATED;
+    actors[0].frames_len = 2;
+  }
+  else if (sprite_frames == 3)
+  {
+    actors[0].sprite_type = SPRITE_ACTOR;
+    actors[0].frames_len = 1;
+  }
+  else
+  {
+    actors[0].sprite_type = SPRITE_STATIC;
+    actors[0].frames_len = sprite_frames;
+  }
+
   SceneRenderActor(0);
 
   // Keep new sprite when switching scene
@@ -683,7 +753,7 @@ void Script_ActorPush_b()
     }
     else if (actors[0].dir.x > 0)
     {
-      dest_x = 240;
+      dest_x = ACTOR_MAX_X;
     }
     else
     {
@@ -695,7 +765,7 @@ void Script_ActorPush_b()
     }
     else if (actors[0].dir.y > 0)
     {
-      dest_y = 240;
+      dest_y = ACTOR_MAX_Y;
     }
     else
     {
@@ -735,10 +805,10 @@ void Script_ActorPush_b()
 void Script_IfActorPos_b()
 {
   if (
-      ((script_cmd_args[1] << 3) + 8 == actors[script_cmd_args[0]].pos.x) &&
-      ((script_cmd_args[2] << 3) + 8 == actors[script_cmd_args[0]].pos.y))
+      ((script_cmd_args[0] << 3) + 8 == actors[script_actor].pos.x) &&
+      ((script_cmd_args[1] << 3) + 8 == actors[script_actor].pos.y))
   { // True path, jump to position specified by ptr
-    script_ptr = script_start_ptr + (script_cmd_args[3] * 256) + script_cmd_args[4];
+    script_ptr = script_start_ptr + (script_cmd_args[2] * 256) + script_cmd_args[3];
   }
   else
   { // False path, skip to next command
@@ -756,36 +826,38 @@ void Script_SaveData_b()
 {
   UWORD i;
 
-  ENABLE_RAM_MBC5;
+  ENABLE_RAM;
 
   RAMPtr = (UBYTE *)RAM_START_PTR;
   RAMPtr[0] = TRUE; // Flag to determine if data has been stored
 
   // Save current scene
-  RAMPtr[1] = scene_index;
+  RAMPtr[1] = scene_index >> 8;
+  RAMPtr[2] = scene_index & 0xFF;
 
   // Save player position
-  RAMPtr[2] = actors[0].pos.x;
-  RAMPtr[3] = actors[0].pos.y;
+  RAMPtr[3] = actors[0].pos.x;
+  RAMPtr[4] = actors[0].pos.y;
   if (actors[0].dir.x < 0)
   {
-    RAMPtr[4] = 2;
+    RAMPtr[5] = 2;
   }
   else if (actors[0].dir.x > 0)
   {
-    RAMPtr[4] = 4;
+    RAMPtr[5] = 4;
   }
   else if (actors[0].dir.y < 0)
   {
-    RAMPtr[4] = 8;
+    RAMPtr[5] = 8;
   }
   else
   {
-    RAMPtr[4] = 1;
+    RAMPtr[5] = 1;
   }
 
   // Save player sprite
-  RAMPtr[5] = map_next_sprite;
+  RAMPtr[6] = map_next_sprite >> 8;
+  RAMPtr[7] = map_next_sprite & 0xFF;
 
   // Save variable values
   RAMPtr = (UBYTE *)RAM_START_VARS_PTR;
@@ -794,7 +866,7 @@ void Script_SaveData_b()
     RAMPtr[i] = script_variables[i];
   }
 
-  DISABLE_RAM_MBC5;
+  DISABLE_RAM;
 
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
@@ -809,14 +881,14 @@ void Script_LoadData_b()
 {
   UWORD i;
 
-  ENABLE_RAM_MBC5;
+  ENABLE_RAM;
 
   RAMPtr = (UBYTE *)RAM_START_PTR;
   if (*RAMPtr == TRUE)
   {
     // Set scene index
     RAMPtr++;
-    scene_next_index = *RAMPtr;
+    scene_next_index = (UWORD)((*(RAMPtr++)) * 256) + *RAMPtr;
     scene_index = scene_next_index + 1;
 
     // Position player
@@ -832,7 +904,7 @@ void Script_LoadData_b()
 
     // Load player sprite
     RAMPtr++;
-    map_next_sprite = *RAMPtr;
+    map_next_sprite = (UWORD)((*(RAMPtr++)) * 256) + *RAMPtr;
 
     // Load variable values
     RAMPtr = (UBYTE *)RAM_START_VARS_PTR;
@@ -843,13 +915,14 @@ void Script_LoadData_b()
 
     // Switch to next scene
     stage_next_type = SCENE;
+    scene_loaded = FALSE;
     FadeSetSpeed(2);
     FadeOut();
 
     script_action_complete = FALSE;
   }
 
-  DISABLE_RAM_MBC5;
+  DISABLE_RAM;
 
   script_ptr += 1 + script_cmd_args_len;
 }
@@ -861,10 +934,10 @@ void Script_LoadData_b()
  */
 void Script_ClearData_b()
 {
-  ENABLE_RAM_MBC5;
+  ENABLE_RAM;
   RAMPtr = (UBYTE *)RAM_START_PTR;
   RAMPtr[0] = FALSE;
-  DISABLE_RAM_MBC5;
+  DISABLE_RAM;
 
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
@@ -882,11 +955,11 @@ void Script_IfSavedData_b()
 {
   UBYTE jump;
 
-  ENABLE_RAM_MBC5;
+  ENABLE_RAM;
   RAMPtr = (UBYTE *)RAM_START_PTR;
   jump = 0;
   jump = *RAMPtr == TRUE;
-  DISABLE_RAM_MBC5;
+  DISABLE_RAM;
 
   if (jump)
   { // True path, jump to position specified by ptr
@@ -975,6 +1048,10 @@ void Script_ActorSetPosToVal_b()
   actors[script_actor].pos.x = (script_variables[script_ptr_x] << 3) + 8;
   actors[script_actor].pos.y = 0; // @wtf-but-needed
   actors[script_actor].pos.y = (script_variables[script_ptr_y] << 3) + 8;
+  if (script_variables[script_ptr_y] == 31)
+  {
+    actors[script_actor].pos.y = ACTOR_MAX_Y;
+  }
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
 }
@@ -992,6 +1069,10 @@ void Script_ActorMoveToVal_b()
   actor_move_dest.x = (script_variables[script_ptr_x] << 3) + 8;
   actor_move_dest.y = 0; // @wtf-but-needed
   actor_move_dest.y = (script_variables[script_ptr_y] << 3) + 8;
+  if (script_variables[script_ptr_y] == 31)
+  {
+    actor_move_dest.y = ACTOR_MAX_Y;
+  }
   script_ptr += 1 + script_cmd_args_len;
   script_action_complete = FALSE;
 }
@@ -1015,10 +1096,24 @@ void Script_ActorMoveRel_b()
     if (script_cmd_args[1] == 1)
     {
       actor_move_dest.x = actor_move_dest.x - (script_cmd_args[0] << 3);
+      // If destination wrapped past left edge set to min X
+      if (actor_move_dest.x > actors[script_actor].pos.x)
+      {
+        actor_move_dest.x = ACTOR_MIN_X;
+      }
+      else if (actor_move_dest.x < ACTOR_MIN_X)
+      {
+        actor_move_dest.x = ACTOR_MIN_X;
+      }
     }
     else
     {
       actor_move_dest.x = actor_move_dest.x + (script_cmd_args[0] << 3);
+      // If destination wrapped past right edge set to max X
+      if (actor_move_dest.x < actors[script_actor].pos.x)
+      {
+        actor_move_dest.x = ACTOR_MAX_X;
+      }
     }
   }
 
@@ -1029,10 +1124,24 @@ void Script_ActorMoveRel_b()
     if (script_cmd_args[3] == 1)
     {
       actor_move_dest.y = actor_move_dest.y - (script_cmd_args[2] << 3);
+      // If destination wrapped past top edge set to min Y
+      if (actor_move_dest.y > actors[script_actor].pos.y)
+      {
+        actor_move_dest.y = ACTOR_MIN_Y;
+      }
+      else if (actor_move_dest.y < ACTOR_MIN_Y)
+      {
+        actor_move_dest.y = ACTOR_MIN_Y;
+      }
     }
     else
     {
       actor_move_dest.y = actor_move_dest.y + (script_cmd_args[2] << 3);
+      // If destination wrapped past bottom edge set to max Y
+      if (actor_move_dest.y < actors[script_actor].pos.y)
+      {
+        actor_move_dest.y = ACTOR_MAX_Y;
+      }
     }
   }
 
@@ -1384,10 +1493,13 @@ void Script_ActorInvoke_b()
  * Command: StackPush
  * ----------------------------
  * Push the current script pointer to the stack
+ * Store script start ptr for if statements, script bank for long scripts.
  */
 void Script_StackPush_b()
 {
+  script_bank_stack[script_stack_ptr] = script_ptr_bank;
   script_stack[script_stack_ptr] = script_ptr;
+  script_start_stack[script_stack_ptr] = script_start_ptr;
   script_stack[script_stack_ptr] += 1 + script_cmd_args_len;
   script_stack_ptr++;
 }
@@ -1396,11 +1508,14 @@ void Script_StackPush_b()
  * Command: StackPop
  * ----------------------------
  * Pop the script pointer from the stack
+ * Retrieve script start ptr for if statements, script bank for long scripts.
  */
 void Script_StackPop_b()
 {
   script_stack_ptr--;
+  script_ptr_bank = script_bank_stack[script_stack_ptr];
   script_ptr = script_stack[script_stack_ptr];
+  script_start_ptr = script_start_stack[script_stack_ptr];
   script_continue = TRUE;
 }
 
@@ -1451,6 +1566,7 @@ void Script_ScenePopState_b()
     map_next_dir.y = scene_stack[scene_stack_ptr].player_dir.y;
 
     stage_next_type = SCENE;
+    scene_loaded = FALSE;
     script_action_complete = FALSE;
     FadeSetSpeed(script_cmd_args[0]);
     FadeOut();
@@ -1497,6 +1613,7 @@ void Script_ScenePopAllState_b()
     map_next_dir.y = scene_stack[scene_stack_ptr].player_dir.y;
 
     stage_next_type = SCENE;
+    scene_loaded = FALSE;
     script_action_complete = FALSE;
     FadeSetSpeed(script_cmd_args[0]);
     FadeOut();
@@ -1575,6 +1692,21 @@ void Script_ActorSetFrame_b()
 }
 
 /*
+ * Command: ActorSetFrameToVal
+ * ----------------------------
+ * Set animation frame of current actor using variable
+ */
+void Script_ActorSetFrameToVal_b()
+{
+  actors[script_actor].frame = 0;
+  actors[script_actor].flip = 0;
+  actors[script_actor].frame = script_variables[(script_cmd_args[0] * 256) + script_cmd_args[1]] % actors[script_actor].frames_len;
+  SceneRenderActor(script_actor);
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
  * Command: ActorSetFlip
  * ----------------------------
  * Set flip state of current actor
@@ -1624,4 +1756,216 @@ void Script_TextMulti_b()
 
   script_ptr += 1 + script_cmd_args_len;
   script_continue = TRUE;
+}
+
+/*
+ * Command: VariableAddFlags
+ * ----------------------------
+ *   arg0: High 8 bits for flag index
+ *   arg1: Low 8 bits for flag index
+ *   arg2: Value
+ */
+void Script_VariableAddFlags_b()
+{
+  UWORD ptr = (script_cmd_args[0] * 256) + script_cmd_args[1];
+  UBYTE a = script_variables[ptr];
+  UBYTE b = script_cmd_args[2];
+  script_variables[ptr] = a | b;
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: VariableClearFlags
+ * ----------------------------
+ *   arg0: High 8 bits for flag index
+ *   arg1: Low 8 bits for flag index
+ *   arg2: Value
+ */
+void Script_VariableClearFlags_b()
+{
+  UWORD ptr = (script_cmd_args[0] * 256) + script_cmd_args[1];
+  UBYTE a = script_variables[ptr];
+  UBYTE b = script_cmd_args[2];
+  script_variables[ptr] = a & ~b;
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: SoundStartTone
+ * ----------------------------
+ */
+void Script_SoundStartTone_b()
+{
+  UWORD tone = (script_cmd_args[0] * 256) + script_cmd_args[1];
+
+  // enable sound
+  NR52_REG = 0x80;
+
+  if (music_mute_frames != 0) {
+	  // mute music on channel 1 & 4
+	  gbt_enable_channels(0x6);
+  } else {
+	  // mute music on channel 1
+	  gbt_enable_channels(0xE);
+  }
+
+  // play tone on channel 1
+  NR10_REG = 0x00;
+  NR11_REG = (0x00 << 6) | 0x01;
+  NR12_REG = (0x0F << 4) | 0x00;
+  NR13_REG = (tone & 0x00FF);
+  NR14_REG = 0x80 | ((tone & 0x0700) >> 8);
+
+  // enable volume
+  NR50_REG = 0x77;
+
+  // enable channel 1
+  NR51_REG |= 0x11;
+
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: SoundStopTone
+ * ----------------------------
+ */
+void Script_SoundStopTone_b()
+{
+  // stop tone on channel 1
+  NR12_REG = 0x00;
+  
+  if (music_mute_frames != 0) {
+	  // keem mute music on channel 4
+	  gbt_enable_channels(0x7);
+  } else {
+	// Unmute music on all ch
+  gbt_enable_channels(0xF);
+  }
+  
+
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: SoundPlayBeep
+ * ----------------------------
+ */
+void Script_SoundPlayBeep_b()
+{
+  UBYTE pitch = script_cmd_args[0];
+
+  // enable sound
+  NR52_REG = 0x80;
+
+  // mute music on channel 4  
+  music_mute_frames = 15u;
+  gbt_enable_channels(0x7);
+
+  // play beep sound on channel 4
+  NR41_REG = 0x01;
+  NR42_REG = (0x0F << 4);
+  NR43_REG = 0x20 | 0x08 | pitch;
+  NR44_REG = 0x80 | 0x40;
+
+  // enable volume
+  NR50_REG = 0x77;
+
+  // enable channel 4
+  NR51_REG |= 0x88;
+
+  // no delay
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: SoundPlayCrash
+ * ----------------------------
+ */
+void Script_SoundPlayCrash_b()
+{
+  // enable sound
+  NR52_REG = 0x80;
+
+  // mute music on channel 4
+  music_mute_frames = 28u;
+  gbt_enable_channels(0x7);
+
+  // play crash sound on channel 4
+  NR41_REG = 0x01;
+  NR42_REG = (0x0F << 4) | 0x02;
+  NR43_REG = 0x13;
+  NR44_REG = 0x80;
+
+  // enable volume
+  NR50_REG = 0x77;
+
+  // enable channel 4
+  NR51_REG |= 0x88;
+
+  // no delay
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: SetTimerScript
+ * ----------------------------
+ * Attach script to timer
+ */
+void Script_SetTimerScript_b()
+{
+  timer_script_duration = script_cmd_args[0];
+  timer_script_time = script_cmd_args[0];
+  timer_script_ptr.bank = script_cmd_args[1];
+  timer_script_ptr.offset = (script_cmd_args[2] * 256) + script_cmd_args[3];
+
+  script_action_complete = TRUE;
+  script_ptr += 1 + script_cmd_args_len;
+}
+
+/*
+ * Command: ResetTimer
+ * ----------------------------
+ * Reset the countdown timer
+ */
+void Script_ResetTimer_b()
+{
+
+  timer_script_time = timer_script_duration;
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: RemoveTimerScript
+ * ----------------------------
+ * Disable timer script
+ */
+void Script_RemoveTimerScript_b()
+{
+  timer_script_duration = 0;
+  script_ptr += 1 + script_cmd_args_len;
+  script_continue = TRUE;
+}
+
+/*
+ * Command: Text with Avatar
+ * ----------------------------
+ * Display a line of dialogue with a 16x16 avatar on the left
+ *
+ *   arg0: High 8 bits for string index
+ *   arg1: Low 8 bits for string index
+ *   arg2: Spritesheet to use as the dialogue avatar
+ */
+void Script_TextWithAvatar_b()
+{
+  script_ptr += 1 + script_cmd_args_len;
+  UIShowText(script_cmd_args[0], (script_cmd_args[1] * 256) + script_cmd_args[2]);
+  UIShowAvatar(script_cmd_args[3]);
+  script_action_complete = FALSE;
 }

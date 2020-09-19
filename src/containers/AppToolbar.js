@@ -29,8 +29,9 @@ const sectionNames = {
   backgrounds: l10n("NAV_BACKGROUNDS"),
   ui: l10n("NAV_UI_ELEMENTS"),
   music: l10n("NAV_MUSIC"),
-  script: l10n("NAV_SCRIPT_REVIEW"),
-  build: l10n("NAV_BUILD_AND_RUN")
+  dialogue: l10n("NAV_DIALOGUE_REVIEW"),
+  build: l10n("NAV_BUILD_AND_RUN"),
+  settings: l10n("NAV_SETTINGS")
 };
 
 class AppToolbar extends Component {
@@ -194,7 +195,7 @@ function mapStateToProps(state) {
   return {
     projectRoot: state.document && state.document.root,
     modified: state.document && state.document.modified,
-    name: state.project.present && state.project.present.name,
+    name: state.entities.present.result.name,
     section,
     zoom,
     showZoom: ["world", "sprites", "backgrounds", "ui"].indexOf(section) > -1,

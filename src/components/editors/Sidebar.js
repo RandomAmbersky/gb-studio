@@ -4,6 +4,39 @@ import { connect } from "react-redux";
 import cx from "classnames";
 import * as actions from "../../actions";
 
+const SidebarTabs = ({ values, value, onChange, buttons }) => (
+  <div className="SidebarTabs">
+    <div className="SidebarTabs__Container">
+      {Object.keys(values).map((key, index) => (
+        <div
+          key={key}
+          className={cx("SidebarTabs__Tab", {
+            "SidebarTabs__Tab--Active": value ? key === value : index === 0
+          })}
+          onClick={() => onChange(key)}
+        >
+          {values[key]}
+        </div>
+      ))}
+    </div>
+    <div className="SidebarTabs__FluidSpacer" />
+    {buttons}
+  </div>
+);
+
+SidebarTabs.propTypes = {
+  value: PropTypes.string,
+  values: PropTypes.objectOf(PropTypes.string).isRequired,
+  onChange: PropTypes.func,
+  buttons: PropTypes.node
+};
+
+SidebarTabs.defaultProps = {
+  buttons: null,
+  value: null,
+  onChange: () => {}
+};
+
 const SidebarHeading = ({ title, buttons }) => (
   <div className="SidebarHeading">
     {title}
@@ -57,21 +90,22 @@ class Sidebar extends Component {
   };
 
   onMouseMove = event => {
-    const { resizeSidebar } = this.props;
+    const { resizeWorldSidebar } = this.props;
     const { dragging } = this.state;
     if (dragging) {
-      resizeSidebar(window.innerWidth - event.pageX);
+      resizeWorldSidebar(window.innerWidth - event.pageX);
     }
   };
 
   render() {
-    const { width, children } = this.props;
+    const { width, children, onMouseDown } = this.props;
     return (
       <div
         className={cx("Sidebar", {
           "Sidebar--Open": true,
           "Sidebar--TwoColumn": width >= 500
         })}
+        onMouseDown={onMouseDown}
       >
         <div
           ref={this.dragHandler}
@@ -89,27 +123,27 @@ class Sidebar extends Component {
 
 Sidebar.propTypes = {
   width: PropTypes.number.isRequired,
-  resizeSidebar: PropTypes.func.isRequired,
-  children: PropTypes.node
+  resizeWorldSidebar: PropTypes.func.isRequired,
+  children: PropTypes.node,
+  onMouseDown: PropTypes.func
 };
 
 Sidebar.defaultProps = {
-  children: null
+  children: null,
+  onMouseDown: undefined
 };
 
 function mapStateToProps(state) {
+  const { worldSidebarWidth: width } = state.settings;
   return {
-    width: state.project.present.settings.sidebarWidth
+    width
   };
 }
 
 const mapDispatchToProps = {
-  resizeSidebar: actions.resizeSidebar
+  resizeWorldSidebar: actions.resizeWorldSidebar
 };
 
-export default connect(
-  mapStateToProps,
-  mapDispatchToProps
-)(Sidebar);
+export default connect(mapStateToProps, mapDispatchToProps)(Sidebar);
 
-export { SidebarColumn, SidebarHeading };
+export { SidebarColumn, SidebarHeading, SidebarTabs };

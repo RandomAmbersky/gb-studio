@@ -4,6 +4,9 @@ import fs from "fs-extra";
 import { buildToolsRoot } from "../../consts";
 import copy from "../helpers/fsCopy";
 import buildMakeBat from "./buildMakeBat";
+import { hexDec } from "../helpers/8bit";
+import getTmp from "../helpers/getTmp";
+import { isMBC1 } from "./helpers"
 
 const HEADER_TITLE = 0x134;
 const HEADER_CHECKSUM = 0x14d;
@@ -20,6 +23,13 @@ const setROMTitle = async (filename, title) => {
     romData[HEADER_TITLE + i] = charCode;
   }
   await fs.writeFile(filename, await patchROM(romData));
+};
+
+const convertHexTo15BitRGB = hex => {
+  const r = Math.floor(hexDec(hex.substring(0, 2)) * (32 / 256));
+  const g = Math.floor(hexDec(hex.substring(2, 4)) * (32 / 256));
+  const b = Math.max(1, Math.floor(hexDec(hex.substring(4, 6)) * (32 / 256)));
+  return `RGB(${r}, ${g}, ${b})`;
 };
 
 const patchROM = romData => {
@@ -46,21 +56,25 @@ const patchROM = romData => {
   return romData;
 };
 
+let firstBuild = true;
+
 const makeBuild = ({
   buildType = "rom",
   buildRoot = "/tmp",
   data = {},
+  cartSize = 64,
   progress = () => {},
   warnings = () => {}
 } = {}) => {
   return new Promise(async (resolve, reject) => {
     const env = Object.create(process.env);
+    const { settings } = data;
 
     const buildToolsPath = `${buildToolsRoot}/${process.platform}-${
       process.arch
     }`;
 
-    const tmpPath = remote.app.getPath("temp");
+    const tmpPath = getTmp();
     const tmpBuildToolsPath = `${tmpPath}/_gbs`;
 
     // Symlink build tools so that path doesn't contain any spaces
@@ -70,15 +84,54 @@ const makeBuild = ({
       await fs.ensureSymlink(buildToolsPath, tmpBuildToolsPath);
     } catch (e) {
       await copy(buildToolsPath, tmpBuildToolsPath, {
-        overwrite: false
+        overwrite: firstBuild
       });
     }
+    
+    firstBuild = false;
 
     env.PATH = [`${tmpBuildToolsPath}/gbdk/bin`, env.PATH].join(":");
     env.GBDKDIR = `${tmpBuildToolsPath}/gbdk/`;
-    env.CART_TYPE = parseInt(data.settings.cartType || "1B", 16);
 
-    const makeBat = await buildMakeBat(buildRoot, { CART_TYPE: env.CART_TYPE });
+    env.CART_TYPE = parseInt(settings.cartType || "1B", 16);
+    env.CART_SIZE = cartSize;
+    env.TMP = getTmp();
+    env.TEMP = getTmp();
+    
+    // Modify game.h to overide color palette
+    let gameHeader = await fs.readFile(`${buildRoot}/include/game.h`, "utf8");
+    if (settings.customColorsEnabled) {
+      gameHeader = gameHeader
+        .replace(/RGB\(29, 31, 28\)/g, convertHexTo15BitRGB(settings.customColorsWhite))
+        .replace(/RGB\(22, 30, 17\)/g, convertHexTo15BitRGB(settings.customColorsLight))
+        .replace(/RGB\(10, 19, 15\)/g, convertHexTo15BitRGB(settings.customColorsDark))
+        .replace(/RGB\(4, 5, 10\)/g, convertHexTo15BitRGB(settings.customColorsBlack));
+    }
+    if (!(settings.customColorsEnabled || settings.gbcFastCPUEnabled)) {
+      gameHeader = gameHeader.replace(/#define CUSTOM_COLORS/g, '');
+    }
+    if (!settings.gbcFastCPUEnabled) {
+      gameHeader = gameHeader.replace(/#define FAST_CPU/g, '');
+    }
+    if(isMBC1(settings.cartType)) {
+      gameHeader = gameHeader.replace(/_MBC5/g, '_MBC1');
+    }
+    await fs.writeFile(`${buildRoot}/include/game.h`, gameHeader, "utf8");
+
+    // Remove GBC Rombyte Offset from Makefile (OSX/Linux) if custom colors and fast CPU are not enabled
+    if (process.platform !== "win32" && !settings.customColorsEnabled && !settings.gbcFastCPUEnabled)
+    {
+      let makeFile = await fs.readFile(`${buildRoot}/Makefile`, "utf8");
+      makeFile = makeFile.replace("-Wl-yp0x143=0x80", "");
+      await fs.writeFile(`${buildRoot}/Makefile`, makeFile, "utf8");
+    }
+
+    const makeBat = await buildMakeBat(buildRoot, {
+      CART_TYPE: env.CART_TYPE,
+      CART_SIZE: env.CART_SIZE,
+      customColorsEnabled: settings.customColorsEnabled,
+      gbcFastCPUEnabled: settings.gbcFastCPUEnabled
+    });
     await fs.writeFile(`${buildRoot}/make.bat`, makeBat);
 
     const command = process.platform === "win32" ? "make.bat" : "make";

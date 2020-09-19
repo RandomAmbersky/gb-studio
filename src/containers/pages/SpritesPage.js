@@ -4,6 +4,7 @@ import { connect } from "react-redux";
 import FilesSidebar from "../../components/assets/FilesSidebar";
 import ImageViewer from "../../components/assets/ImageViewer";
 import * as actions from "../../actions";
+import { getSpriteSheets } from "../../reducers/entitiesReducer";
 
 class SpritesPage extends Component {
   constructor(props) {
@@ -33,7 +34,7 @@ class SpritesPage extends Component {
 
     return (
       <div>
-        <ImageViewer file={file} />
+        {file && <ImageViewer file={file} />}
         <FilesSidebar
           files={filesList}
           selectedFile={file}
@@ -65,10 +66,7 @@ SpritesPage.defaultProps = {
 
 function mapStateToProps(state) {
   const { id } = state.navigation;
-  const files =
-    state.project.present && state.project.present.spriteSheets
-      ? state.project.present.spriteSheets
-      : [];
+  const files = getSpriteSheets(state);
   return {
     files,
     id

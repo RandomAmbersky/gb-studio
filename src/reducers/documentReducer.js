@@ -6,6 +6,9 @@ import {
   PROJECT_SAVE_REQUEST,
   PROJECT_SAVE_SUCCESS,
   PROJECT_SAVE_FAILURE,
+  PROJECT_SAVE_AS_REQUEST,
+  PROJECT_SAVE_AS_SUCCESS,
+  PROJECT_SAVE_AS_FAILURE,
   ADD_SCENE,
   MOVE_SCENE,
   EDIT_SCENE,
@@ -27,10 +30,13 @@ import {
   EDIT_WORLD,
   EDIT_PROJECT,
   EDIT_PROJECT_SETTINGS,
+  EDIT_CUSTOM_EVENT,
+  REMOVE_CUSTOM_EVENT,
   EDIT_SCENE_EVENT_DESTINATION_POSITION,
   EDIT_ACTOR_EVENT_DESTINATION_POSITION,
   EDIT_TRIGGER_EVENT_DESTINATION_POSITION,
-  EDIT_PLAYER_START_AT
+  EDIT_PLAYER_START_AT,
+  ADD_CUSTOM_EVENT
 } from "../actions/actionTypes";
 
 export default function modified(state = initialState.document, action) {
@@ -64,6 +70,24 @@ export default function modified(state = initialState.document, action) {
         ...state,
         saving: false
       };
+    case PROJECT_SAVE_AS_REQUEST:
+      return {
+        ...state,
+        saving: true
+      };
+    case PROJECT_SAVE_AS_SUCCESS:
+      return {
+        ...state,
+        path: action.path,
+        root: path.dirname(action.path),
+        modified: false,
+        saving: false
+      };
+    case PROJECT_SAVE_AS_FAILURE:
+      return {
+        ...state,
+        saving: false
+      };
     case MOVE_SCENE:
     case EDIT_SCENE:
     case REMOVE_SCENE:
@@ -85,6 +109,9 @@ export default function modified(state = initialState.document, action) {
     case EDIT_WORLD:
     case EDIT_PROJECT:
     case EDIT_PROJECT_SETTINGS:
+    case ADD_CUSTOM_EVENT:
+    case EDIT_CUSTOM_EVENT:
+    case REMOVE_CUSTOM_EVENT:
     case EDIT_SCENE_EVENT_DESTINATION_POSITION:
     case EDIT_ACTOR_EVENT_DESTINATION_POSITION:
     case EDIT_TRIGGER_EVENT_DESTINATION_POSITION:

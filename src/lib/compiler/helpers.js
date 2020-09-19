@@ -137,6 +137,23 @@ const combineMultipleChoiceText = args => {
   return `${trueText}\n${falseText}`;
 };
 
+const isMBC1 = cartType => cartType === "03" || cartType === "02";
+
+const replaceInvalidCustomEventVariables = variable => {
+  const variableIndex = parseInt(String(variable).replace(/^L/, ""), 10);
+  if (variableIndex >= 10) {
+    return "0";
+  }
+  return String(variableIndex);
+};
+
+const replaceInvalidCustomEventActors = actor => {
+  if (actor.indexOf("-") > -1 || parseInt(actor, 10) >= 10) {
+    return "0";
+  }
+  return actor;
+};
+
 module.exports = {
   nameToCName,
   dirDec,
@@ -149,5 +166,8 @@ module.exports = {
   operatorDec,
   spriteTypeDec,
   actorFramesPerDir,
-  combineMultipleChoiceText
+  combineMultipleChoiceText,
+  isMBC1,
+  replaceInvalidCustomEventVariables,
+  replaceInvalidCustomEventActors
 };

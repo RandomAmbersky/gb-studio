@@ -1,5 +1,6 @@
 import React, { Component } from "react";
 import PropTypes from "prop-types";
+import { clipboard } from "electron";
 import { connect } from "react-redux";
 import * as actions from "../../actions";
 import ScriptEditor from "../script/ScriptEditor";
@@ -8,11 +9,19 @@ import castEventValue from "../../lib/helpers/castEventValue";
 import { DropdownButton } from "../library/Button";
 import { MenuItem, MenuDivider } from "../library/Menu";
 import l10n from "../../lib/helpers/l10n";
-import Sidebar, { SidebarHeading, SidebarColumn } from "./Sidebar";
+import Sidebar, { SidebarHeading, SidebarColumn, SidebarTabs } from "./Sidebar";
 import { SceneIcon } from "../library/Icons";
 import { TriggerShape, SceneShape } from "../../reducers/stateShape";
+import WorldEditor from "./WorldEditor";
 
 class TriggerEditor extends Component {
+  constructor() {
+    super();
+    this.state = {
+      clipboardTrigger: null
+    };
+  }
+
   onEdit = key => e => {
     const { editTrigger, sceneId, trigger } = this.props;
     editTrigger(sceneId, trigger.id, {
@@ -26,8 +35,9 @@ class TriggerEditor extends Component {
   };
 
   onPaste = e => {
-    const { pasteTrigger, sceneId, clipboardTrigger } = this.props;
-    pasteTrigger(sceneId, clipboardTrigger);
+    const { setTriggerPrefab } = this.props;
+    const { clipboardTrigger } = this.state;
+    setTriggerPrefab(clipboardTrigger);
   };
 
   onRemove = e => {
@@ -35,20 +45,49 @@ class TriggerEditor extends Component {
     removeTrigger(sceneId, trigger.id);
   };
 
+  readClipboard = e => {
+    try {
+      const clipboardData = JSON.parse(clipboard.readText());
+      if (clipboardData.__type === "trigger") {
+        this.setState({ clipboardTrigger: clipboardData });
+      } else {
+        this.setState({ clipboardTrigger: null });
+      }
+    } catch (err) {
+      this.setState({ clipboardTrigger: null });
+    }
+  };
+
   render() {
-    const { index, trigger, scene, clipboardTrigger, selectScene } = this.props;
+    const { index, trigger, scene, selectScene, selectSidebar } = this.props;
 
     if (!trigger) {
-      return <div />;
+      return <WorldEditor />;
     }
 
+    const { clipboardTrigger } = this.state;
+
+    const renderScriptHeader = ({ buttons }) => (
+      <SidebarTabs
+        values={{
+          trigger: l10n("SIDEBAR_ON_TRIGGER")
+        }}
+        buttons={buttons}
+      />
+    );
+
     return (
-      <Sidebar>
+      <Sidebar onMouseDown={selectSidebar}>
         <SidebarColumn>
           <SidebarHeading
             title={l10n("TRIGGER")}
             buttons={
-              <DropdownButton small transparent right>
+              <DropdownButton
+                small
+                transparent
+                right
+                onMouseDown={this.readClipboard}
+              >
                 <MenuItem onClick={this.onCopy}>
                   {l10n("MENU_COPY_TRIGGER")}
                 </MenuItem>
@@ -167,9 +206,11 @@ class TriggerEditor extends Component {
         <SidebarColumn>
           <ScriptEditor
             value={trigger.script}
-            title={l10n("SIDEBAR_TRIGGER_SCRIPT")}
+            title={l10n("SIDEBAR_ON_TRIGGER")}
+            renderHeader={renderScriptHeader}
             type="trigger"
             onChange={this.onEdit("script")}
+            entityId={trigger.id}
           />
         </SidebarColumn>
       </Sidebar>
@@ -182,31 +223,27 @@ TriggerEditor.propTypes = {
   trigger: TriggerShape,
   scene: SceneShape,
   sceneId: PropTypes.string.isRequired,
-  clipboardTrigger: TriggerShape,
   editTrigger: PropTypes.func.isRequired,
   removeTrigger: PropTypes.func.isRequired,
   copyTrigger: PropTypes.func.isRequired,
-  pasteTrigger: PropTypes.func.isRequired,
-  selectScene: PropTypes.func.isRequired
+  setTriggerPrefab: PropTypes.func.isRequired,
+  selectScene: PropTypes.func.isRequired,
+  selectSidebar: PropTypes.func.isRequired
 };
 
 TriggerEditor.defaultProps = {
   trigger: null,
-  scene: null,
-  clipboardTrigger: null
+  scene: null
 };
 
 function mapStateToProps(state, props) {
-  const scenes = state.project.present && state.project.present.scenes;
-  const scene = scenes && scenes.find(s => s.id === props.sceneId);
-  const trigger = scene && scene.triggers.find(t => t.id === props.id);
-  const index = scene && scene.triggers.indexOf(trigger);
-
+  const trigger = state.entities.present.entities.triggers[props.id];
+  const scene = state.entities.present.entities.scenes[props.sceneId];
+  const index = scene.triggers.indexOf(props.id);
   return {
     index,
     trigger,
-    scene,
-    clipboardTrigger: state.clipboard.trigger
+    scene
   };
 }
 
@@ -214,11 +251,9 @@ const mapDispatchToProps = {
   editTrigger: actions.editTrigger,
   removeTrigger: actions.removeTrigger,
   copyTrigger: actions.copyTrigger,
-  pasteTrigger: actions.pasteTrigger,
-  selectScene: actions.selectScene
+  setTriggerPrefab: actions.setTriggerPrefab,
+  selectScene: actions.selectScene,
+  selectSidebar: actions.selectSidebar
 };
 
-export default connect(
-  mapStateToProps,
-  mapDispatchToProps
-)(TriggerEditor);
+export default connect(mapStateToProps, mapDispatchToProps)(TriggerEditor);

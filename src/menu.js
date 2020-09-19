@@ -6,10 +6,12 @@ const isDevMode = process.execPath.match(/[\\/]electron/);
 
 let menu;
 
-app.on("ready", async () => {
+const buildMenu = async (plugins = []) => {
   // L10N requires app ready to get locale
   // eslint-disable-next-line global-require
-  const l10n = require("./lib/helpers/l10n").default;
+  const l10nHelpers = require("./lib/helpers/l10n");
+  const l10n = l10nHelpers.default;
+  const locales = l10nHelpers.locales;
 
   const template = [
     {
@@ -34,6 +36,22 @@ app.on("ready", async () => {
           accelerator: "CommandOrControl+S",
           click: () => {
             notifyListeners("save");
+          }
+        },
+        {
+          label: l10n("MENU_SAVE_AS"),
+          accelerator: "CommandOrControl+Alt+S",
+          click: () => {
+            notifyListeners("saveAs");
+          }
+        },
+
+        { type: "separator" },
+        {
+          label: l10n("MENU_RELOAD_ASSETS"),
+          accelerator: "CommandOrControl+Shift+R",
+          click: () => {
+            notifyListeners("reloadAssets");
           }
         },
         { type: "separator" },
@@ -94,48 +112,6 @@ app.on("ready", async () => {
               }
             }
           ]
-        },
-        { type: "separator" },
-        {
-          label: l10n("MENU_CART_TYPE"),
-          submenu: [
-            {
-              id: "cart1B",
-              label: "MBC5+RAM+BATTERY",
-              type: "radio",
-              checked: true,
-              click() {
-                notifyListeners("updateSetting", "cartType", "1B");
-              }
-            },
-            {
-              id: "cart03",
-              label: "MBC1+RAM+BATTERY",
-              type: "radio",
-              checked: false,
-              click() {
-                notifyListeners("updateSetting", "cartType", "03");
-              }
-            },
-            {
-              id: "cart1A",
-              label: "MBC5+RAM",
-              type: "radio",
-              checked: false,
-              click() {
-                notifyListeners("updateSetting", "cartType", "1A");
-              }
-            },
-            {
-              id: "cart02",
-              label: "MBC1+RAM",
-              type: "radio",
-              checked: false,
-              click() {
-                notifyListeners("updateSetting", "cartType", "02");
-              }
-            }
-          ]
         }
       ]
     },
@@ -178,10 +154,10 @@ app.on("ready", async () => {
           }
         },
         {
-          label: l10n("MENU_SCRIPT_REVIEW"),
+          label: l10n("MENU_DIALOGUE_REVIEW"),
           accelerator: "CommandOrControl+6",
           click: () => {
-            notifyListeners("section", "script");
+            notifyListeners("section", "dialogue");
           }
         },
         {
@@ -189,6 +165,13 @@ app.on("ready", async () => {
           accelerator: "CommandOrControl+7",
           click: () => {
             notifyListeners("section", "build");
+          }
+        },
+        {
+          label: l10n("MENU_SETTINGS"),
+          accelerator: "CommandOrControl+8",
+          click: () => {
+            notifyListeners("section", "settings");
           }
         },
         { type: "separator" },
@@ -224,6 +207,34 @@ app.on("ready", async () => {
               }
             }
           ]
+        },
+        {
+          label: l10n("MENU_LANGUAGE"),
+          submenu: [].concat(
+            [
+              {
+                id: "localeDefault",
+                label: l10n("MENU_LANGUAGE_DEFAULT"),
+                type: "checkbox",
+                checked: settings.get("locale") === undefined,
+                click() {
+                  notifyListeners("updateSetting", "locale", undefined);
+                }
+              },
+              { type: "separator" }
+            ],
+            locales.map(locale => {
+              return {
+                id: `locale-${locale}`,
+                label: locale,
+                type: "checkbox",
+                checked: settings.get("locale") === locale,
+                click() {
+                  notifyListeners("updateSetting", "locale", locale);
+                }
+              };
+            })
+          )
         },
         { type: "separator" },
         {
@@ -291,9 +302,17 @@ app.on("ready", async () => {
     }
   ];
 
+  if (plugins && plugins.length > 0) {
+    template.splice(3, 0, {
+      id: "plugins",
+      label: l10n("MENU_PLUGINS"),
+      submenu: plugins
+    });
+  }
+
   if (isDevMode) {
-    template[3].submenu.push({ type: "separator" });
-    template[3].submenu.push({
+    template[template.length - 3].submenu.push({ type: "separator" });
+    template[template.length - 3].submenu.push({
       label: "Debug",
       submenu: [
         { role: "reload" },
@@ -341,7 +360,7 @@ app.on("ready", async () => {
     );
 
     // Window menu
-    template[5].submenu = [
+    template[template.length - 2].submenu = [
       { role: "minimize" },
       { role: "zoom" },
       { type: "separator" },
@@ -349,7 +368,7 @@ app.on("ready", async () => {
     ];
   } else {
     // About menu item for Windows / Linux
-    template[5].submenu.push(
+    template[template.length - 1].submenu.push(
       { type: "separator" },
       {
         label: l10n("MENU_ABOUT"),
@@ -368,17 +387,21 @@ app.on("ready", async () => {
 
   menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
-});
+};
+
+app.on("ready", () => buildMenu([]));
 
 const listeners = {
   new: [],
   open: [],
   save: [],
+  saveAs: [],
   checkUpdates: [],
   undo: [],
   redo: [],
   section: [],
   zoom: [],
+  reloadAssets: [],
   updateSetting: [],
   run: [],
   build: []
@@ -407,5 +430,8 @@ const openAbout = () => {
 export default {
   on,
   off,
-  ref: () => menu
+  ref: () => menu,
+  buildMenu: plugins => {
+    buildMenu(plugins);
+  }
 };
